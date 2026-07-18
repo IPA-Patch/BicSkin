@@ -1,0 +1,52 @@
+{
+	"[swift]": {
+		"editor.defaultFormatter": "swiftlang.swift-vscode",
+		"editor.formatOnSave": true,
+		"editor.tabSize": 4
+	},
+	"[python]": {
+		"editor.defaultFormatter": "charliermarsh.ruff",
+		"editor.formatOnSave": true,
+		"editor.codeActionsOnSave": {
+			"source.fixAll.ruff": "explicit",
+			"source.organizeImports.ruff": "explicit"
+		}
+	},
+	"[toml]": {
+		"editor.defaultFormatter": "tamasfe.even-better-toml"
+	},
+	"[objective-c]": {
+		"editor.defaultFormatter": "xaver.clang-format",
+		"editor.formatOnSave": true,
+		"editor.tabSize": 4
+	},
+	"[objective-cpp]": {
+		"editor.defaultFormatter": "xaver.clang-format",
+		"editor.formatOnSave": true,
+		"editor.tabSize": 4
+	},
+	"[c]": {
+		"editor.defaultFormatter": "xaver.clang-format",
+		"editor.formatOnSave": true,
+		"editor.tabSize": 4
+	},
+	"[typescript]": {
+		"editor.tabSize": 4
+	},
+
+	"files.associations": {
+		"*.xm": "objective-c",
+		"*.x": "objective-c"
+	},
+
+	"swift.path": "/usr/bin/swift",
+	"swift.buildPath": ".build",
+	"swift.diagnostics": true,
+
+	"python.defaultInterpreterPath": "/home/vscode/app/.venv/bin/python",
+	"python.terminal.activateEnvironment": false,
+	"python.analysis.typeCheckingMode": "basic",
+
+	"ruff.importStrategy": "fromEnvironment",
+	"ruff.nativeServer": "on"
+}
