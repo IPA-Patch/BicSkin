@@ -1,8 +1,8 @@
 <h1 align="center">BicSkin</h1>
 
 <p align="center">
-  <em>Reveal a BicCamera point-card face that normally requires<br/>
-  owning the matching card to display — all client-side, zero server impact.</em>
+  <em>Reveal the Bicame Musume (ビッカメ娘) point-card face on any account —<br/>
+  normally you'd need to own that specific card to see it. All client-side, zero server impact.</em>
 </p>
 
 <p align="center">
@@ -19,25 +19,25 @@
 **ビックカメラ (BicCamera)** is Bic Camera Inc.'s official iOS shopping app,
 available on the [App Store](https://apps.apple.com/jp/app/id518593576).
 
-BicSkin is a local tweak for **BicCamera** that swaps the point-card
-background image on screen with a double-tap — pulling in the
-`pointcard_default` asset that ships inside BicCamera's own bundle but
-that the app never surfaces to you unless you own the specific card
-tied to it. The swap is purely visual, runs entirely on-device, and
-doesn't touch the server or your account state.
+BicSkin is a local tweak for **BicCamera** that flips the on-screen
+point-card face with a double-tap. The swap target is the *Bicame
+Musume* (ビッカメ娘) collaboration card design — an art the app
+normally only draws for accounts that hold that specific card.
+The image is fetched once at launch from BicCamera's own CDN and cached
+in memory; every subsequent flip is instant. All of this runs on-device
+and never touches the server or your account state.
 
 <p align="center">
-  <img src="docs/pointcard-bicame-musume.png" alt="Point card as the app normally shows it" width="240" />
-  <img src="docs/pointcard-default.png" alt="After flip: pointcard_default revealed" width="240" />
+  <img src="docs/pointcard-original.png" alt="Point card as this account normally shows it" width="240" />
+  <img src="docs/pointcard-bicame-musume.png" alt="After flip: Bicame Musume face" width="240" />
 </p>
 
-Left: the point-card face the app normally shows for the logged-in
-account (in these captures, the *Bicame Musume* / ビッカメ娘 design that
-this account owns). Right: after a double-tap flip, the same view is
-swapped to BicCamera's bundled `pointcard_default` background — the one
-you can't see without the card. The numeric fields (`0314 159 265 35`,
-`0 pt`, expiry `2038-01-19`) aren't real; see
-[Screenshot helper](#screenshot-helper-debug-only) below.
+Left: the point card as this account normally shows it (the plain
+BicCamera default — this demo account doesn't own Bicame Musume).
+Right: after a double-tap flip, the same card view is swapped for the
+Bicame Musume design, pulled straight from BicCamera's CDN. The numeric
+fields (`0314 159 265 35`, `0 pt`, expiry `2038-01-19`) aren't real —
+see [Screenshot helper](#screenshot-helper-debug-only) below.
 
 ## Demo
 
@@ -54,19 +54,24 @@ If the inline player doesn't render for you, download
 
 | Toggle | What it does |
 |---|---|
-| **Card face flip** | Double-tap the point-card image to flip between the account's normally-fetched card art and the `pointcard_default` asset in BicCamera's own bundle. Uses a manual `CATransform3D` Y-axis rotation so the card's rounded corners are preserved throughout the animation. The flip is scoped to the card + barcode block — the point-balance row below stays static. |
+| **Card face flip** | Double-tap the point-card image to flip between the account's normally-fetched card art and the Bicame Musume design pulled from BicCamera's CDN. Uses a manual `CATransform3D` Y-axis rotation so the card's rounded corners are preserved throughout the animation. Scoped to the card + barcode block — the point-balance row below stays static. |
 
 ## Card face flip
 
-The point-card image is a `UIImageView` inside a `PointCardViewCell`.
-The first `setImage:` per instance (skipping views under 100k px so app
-icons and thumbnails are ignored) attaches a double-tap
-`UITapGestureRecognizer` and stashes the fetched image via an
+The swap image is fetched once when the tweak loads
+(`https://d1v4cay8lxkuwy.cloudfront.net/?storagekey=/images/pointCard/bicamemusume.png`)
+on a background queue and cached in a process-global `UIImage`.
+Hardcoding the URL keeps the tweak resilient to renames of BicCamera's
+in-app asset catalog and avoids the `imageNamed:` fallback path
+entirely. If the fetch fails, the double-tap is a no-op — the app's own
+card art stays on screen.
+
+The point-card image itself is a `UIImageView` inside a
+`PointCardViewCell`. The first `setImage:` per instance (skipping views
+under 100k px so app icons and thumbnails are ignored) attaches a
+double-tap `UITapGestureRecognizer` and stashes the fetched image via an
 associated object. Each tap toggles a process-global flag and re-invokes
-`setImage:` with either the stashed original or
-`[UIImage imageNamed:@"pointcard_default"]` — which resolves through
-BicCamera's own main bundle, so the swap loads an asset that's already
-shipping inside the app.
+`setImage:` with either the stashed original or the cached swap image.
 
 The animation is intentionally *not* the built-in flip transition.
 UIKit's `UIViewAnimationOptionTransitionFlipFromLeft/Right` takes a
