@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+# ---------------------------------------------------------------------------
+# Template pre-commit hook.
+#
+# Install with `make hooks`, which points core.hooksPath at scripts/.
+# Add project-specific gates below (recipe verification, lint runs,
+# forbidden-file guards, secret scans …). Exit non-zero to block the
+# commit; exit 0 (or fall through) to allow it.
+# ---------------------------------------------------------------------------
+
+set -e
+
+STAGED=$(git diff --cached --name-only)
+
+# Example: fail if anyone tries to commit a decrypted IPA into the repo.
+if printf '%s\n' "$STAGED" | grep -qE '\.ipa$'; then
+    echo "pre-commit: refusing to commit an .ipa artifact." >&2
+    exit 1
+fi
+
+exit 0
