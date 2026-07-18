@@ -21,7 +21,9 @@ static UIImage *g_bicame_image = nil;
 // asset `pointcard_default` から imageNamed で引く。lazy 読み込み。
 static UIImage *g_default_image = nil;
 
-// トグル状態 (NO = default 表示、YES = Bicame Musume 表示)
+// トグル状態 (NO = default 表示、YES = Bicame Musume 表示)。
+// UserDefaults に永続化して、次回起動時にも同じ側を初期表示する。
+static NSString *const kBicSkinShowBicameKey = @"__BicSkin_showBicame__";
 static BOOL g_show_bicame = NO;
 
 // ---------------------------------------------------------------------------
@@ -58,19 +60,14 @@ static void bic_log(NSString *fmt, ...) {
 }
 
 // ---------------------------------------------------------------------------
-// JSON hook: ポイントカードレスポンスを 2 方向で処理する。
-//   1) inspect (常時): pointCardImage の URL を見て初期表示側を決める。
-//      アカウントが既に Bicame Musume 所有なら g_show_bicame = YES にしておくと、
-//      初回タップで自然と default 側へ flip する挙動になる。
-//   2) tamper (DEBUG 専用): ダミー値で番号・バーコード・残高等を上書き。
-//      機能説明スクショで実値を晒さないためのもの。FINALPACKAGE=1 で消える。
+// DEBUG ビルド専用: ポイントカードレスポンスをダミー値で上書き
+//   機能説明スクショで実値を晒さないためのもの。FINALPACKAGE=1 で消える。
 // ---------------------------------------------------------------------------
 #ifdef DEBUG
 static NSString * const kDummyBarcode          = @"3141592653589";
 static const long long kDummyCardNumber        = 31415926535LL;
 static NSString * const kDummyPointExpiration  = @"2038-01-19";  // Y2K38
 static NSString * const kDummyBicpayExpiration = @"2077-01-01";  // 目印用
-#endif
 
 static id bic_skin_apply(id obj) {
     if (![obj isKindOfClass:[NSDictionary class]]) return obj;
@@ -78,23 +75,6 @@ static id bic_skin_apply(id obj) {
     if (dict[@"pointCardNumber"] == nil && dict[@"barcodeNumber"] == nil) {
         return obj;
     }
-
-    // 1) 初期表示側の決定 (1 回だけ)。pointCardImage を含む本物の profile
-    //    response でのみ発火するようにガードする (pointCardNumber は他の
-    //    エンドポイントの keys にも入ってるので条件に使えない)。
-    id img = dict[@"pointCardImage"];
-    if ([img isKindOfClass:[NSString class]]) {
-        static dispatch_once_t once;
-        dispatch_once(&once, ^{
-            BOOL isBicame = [(NSString *)img containsString:@"bicamemusume"];
-            g_show_bicame = isBicame;
-            bic_log(@"initial state: %s (pointCardImage=%@)",
-                    isBicame ? "bicame" : "default", img);
-        });
-    }
-
-#ifdef DEBUG
-    // 2) ダミー値上書き
     NSMutableDictionary *m =
         [dict isKindOfClass:[NSMutableDictionary class]]
             ? (NSMutableDictionary *)dict
@@ -110,9 +90,18 @@ static id bic_skin_apply(id obj) {
     bic_log(@"[DEBUG] tampering applied to keys=%@",
             [dict.allKeys componentsJoinedByString:@","]);
     return m;
-#else
-    return obj;
+}
 #endif
+
+// 与えられた UIImageView が PointCard 系のセル配下に居るか判定。
+// setImage の時点で view が hierarchy に載っていれば class 名で当てられる。
+static BOOL bic_is_point_card_view(UIImageView *iv) {
+    for (UIView *v = iv.superview; v; v = v.superview) {
+        if ([NSStringFromClass([v class]) containsString:@"PointCard"]) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 // iv を含む枝を深さ優先で辿り、最深の cornerRadius > 0 の view を返す。
@@ -137,9 +126,17 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
 
 @implementation UIImageView (BicSkin)
 
-// 自分自身の呼び出しは swizzle 後に元の setImage: の実装に飛ぶ (%orig と同等)
+// 自分自身の呼び出しは swizzle 後に元の setImage: の実装に飛ぶ (%orig と同等)。
+// PointCard 判定できる時のみ image を UserDefaults 由来の側 (default / Bicame
+// Musume) に差し替えて呼び直す。判定に失敗するタイミング (setImage が view
+// hierarchy 挿入前に呼ばれるケース等) では原本のまま通す。
 - (void)bicSkin_setImage:(UIImage *)image {
-    [self bicSkin_setImage:image];
+    UIImage *toSet = image;
+    if (image && image.CGImage && bic_is_point_card_view(self) &&
+        g_default_image && g_bicame_image) {
+        toSet = g_show_bicame ? g_bicame_image : g_default_image;
+    }
+    [self bicSkin_setImage:toSet];
 
     if (!image) return;
     CGImageRef cg = image.CGImage;
@@ -148,16 +145,15 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
     size_t h = CGImageGetHeight(cg);
     if (w * h < 100000) return;
 
-    // default 画像を lazy load。app bundle 内 asset `pointcard_default` を引く。
-    // ctor 時に呼ぶと asset catalog がまだ ready じゃないケースがあるので、
-    // 最初の大きな setImage: の主 thread callback 経路でロードする。
+    // default 画像 lazy load。asset catalog が ready な大画像 setImage で。
     if (!g_default_image) {
         g_default_image = [UIImage imageNamed:@"pointcard_default"];
-        bic_log(@"default image %@ (imageNamed:pointcard_default)",
-                g_default_image ? @"loaded" : @"MISSING");
+        if (g_default_image) {
+            bic_log(@"default image loaded (imageNamed:pointcard_default)");
+        }
     }
 
-    // ダブルタップ gesture を 1 回だけ install
+    // ダブルタップ gesture を 1 回だけ install (大画像全般)
     NSNumber *installed = objc_getAssociatedObject(self,
         @selector(bicSkinTapInstalled));
     if ([installed boolValue]) return;
@@ -180,8 +176,10 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
         return;
     }
     g_show_bicame = !g_show_bicame;
+    [[NSUserDefaults standardUserDefaults] setBool:g_show_bicame
+                                            forKey:kBicSkinShowBicameKey];
     UIImage *next = g_show_bicame ? g_bicame_image : g_default_image;
-    bic_log(@"DOUBLE-TAP toggle -> showBicame=%d img=%@",
+    bic_log(@"DOUBLE-TAP toggle -> showBicame=%d img=%@ (persisted)",
             g_show_bicame, next);
 
     UIImageView *iv = self;
@@ -247,8 +245,9 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
 @end
 
 // ---------------------------------------------------------------------------
-// NSJSONSerialization swizzle。inspect は常時、tamper は DEBUG のみ。
+// DEBUG: NSJSONSerialization JSONObjectWithData: を swizzle して dummy 注入
 // ---------------------------------------------------------------------------
+#ifdef DEBUG
 @interface NSJSONSerialization (BicSkin)
 + (id)bicSkin_JSONObjectWithData:(NSData *)data
                          options:(NSJSONReadingOptions)opt
@@ -272,6 +271,7 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
     return bic_skin_apply(obj);
 }
 @end
+#endif
 
 // ---------------------------------------------------------------------------
 // Bicame Musume 画像 prefetch — CDN からバックグラウンドで一度だけ取得してメモリに
@@ -330,18 +330,22 @@ static void bic_init(void) {
                          @selector(setImage:),
                          @selector(bicSkin_setImage:));
     bic_prefetch_bicame_image();
-    // NSJSONSerialization swizzle は inspect (初期表示側決定) のため常時 install。
-    // DEBUG ビルドでは加えて dummy 値上書きも走る。
+
+    // 前回セッションで最後にトグルした側を復元
+    g_show_bicame = [[NSUserDefaults standardUserDefaults]
+                        boolForKey:kBicSkinShowBicameKey];
+
+#ifdef DEBUG
     bic_swizzle_class([NSJSONSerialization class],
                       @selector(JSONObjectWithData:options:error:),
                       @selector(bicSkin_JSONObjectWithData:options:error:));
     bic_swizzle_class([NSJSONSerialization class],
                       @selector(JSONObjectWithStream:options:error:),
                       @selector(bicSkin_JSONObjectWithStream:options:error:));
-#ifdef DEBUG
-    bic_log(@"===== BicSkin loaded @ pid=%d (DEBUG: dummy tampering ON) =====",
-            getpid());
+    bic_log(@"===== BicSkin loaded @ pid=%d (DEBUG: dummy tampering ON) showBicame=%d =====",
+            getpid(), g_show_bicame);
 #else
-    bic_log(@"===== BicSkin loaded @ pid=%d (RELEASE) =====", getpid());
+    bic_log(@"===== BicSkin loaded @ pid=%d (RELEASE) showBicame=%d =====",
+            getpid(), g_show_bicame);
 #endif
 }

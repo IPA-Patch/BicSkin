@@ -28,13 +28,12 @@ point-card face with a double-tap between two fixed images:
 - the ***Bicame Musume*** (ビッカメ娘) **collaboration design** —
   fetched once at launch from BicCamera's CDN and cached in memory.
 
-The initial side is picked to match what the profile API says your
-account actually shows: if the fetched `pointCardImage` URL is Bicame
-Musume, BicSkin starts on Bicame Musume and the first tap flips to
-default; otherwise it starts on default and the first tap flips to
-Bicame Musume. Either way, everyone who installs the tweak can see both
-faces. Every change runs on-device and never touches the server or your
-account state.
+The last side you flipped to is persisted to `NSUserDefaults`, so the
+next launch restores it as the starting face — the tweak intercepts the
+first `setImage:` on any view sitting inside a `PointCard`-named
+ancestor and swaps the app's fetched art for the persisted choice
+before it ever renders. Every change runs on-device and never touches
+the server or your account state.
 
 <p align="center">
   <img src="docs/pointcard-original.png" alt="Point card as this account normally shows it" width="240" />
