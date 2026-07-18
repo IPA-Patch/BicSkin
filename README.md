@@ -20,12 +20,21 @@
 available on the [App Store](https://apps.apple.com/jp/app/id518593576).
 
 BicSkin is a local tweak for **BicCamera** that flips the on-screen
-point-card face with a double-tap. The swap target is the *Bicame
-Musume* (ビッカメ娘) collaboration card design — an art the app
-normally only draws for accounts that hold that specific card.
-The image is fetched once at launch from BicCamera's own CDN and cached
-in memory; every subsequent flip is instant. All of this runs on-device
-and never touches the server or your account state.
+point-card face with a double-tap between two fixed images:
+
+- the **plain default** — BicCamera's own bundled `pointcard_default`
+  watermark, the fallback face the app already carries for accounts
+  without a specific card art assigned;
+- the ***Bicame Musume*** (ビッカメ娘) **collaboration design** —
+  fetched once at launch from BicCamera's CDN and cached in memory.
+
+The initial side is picked to match what the profile API says your
+account actually shows: if the fetched `pointCardImage` URL is Bicame
+Musume, BicSkin starts on Bicame Musume and the first tap flips to
+default; otherwise it starts on default and the first tap flips to
+Bicame Musume. Either way, everyone who installs the tweak can see both
+faces. Every change runs on-device and never touches the server or your
+account state.
 
 <p align="center">
   <img src="docs/pointcard-original.png" alt="Point card as this account normally shows it" width="240" />
