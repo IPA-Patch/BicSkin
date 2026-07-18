@@ -6,11 +6,14 @@ An iOS tweak for **BicCamera** (`com.biccamera.ios.mobile.BicCamera`) that lets 
 
 Double-tap the card to flip between the card image the app is showing and the bundled placeholder:
 
-| Bikkame Musume (ビッカメ娘) | Placeholder (`pointcard_default`) |
+| Bicame Musume (ビッカメ娘) | Placeholder (`pointcard_default`) |
 |:---:|:---:|
-| <img src="docs/pointcard-bikkame-musume.png" width="280"> | <img src="docs/pointcard-default.png" width="280"> |
+| <img src="docs/pointcard-bicame-musume.png" width="280"> | <img src="docs/pointcard-default.png" width="280"> |
 
-Both captures use dummy card number / balance / barcode (`0314 159 265 35`) injected by the `DEBUG`-only screenshot mode, so nothing real is exposed here either.
+Nothing here is a real account:
+
+- The **card design** on the left is BicCamera's own Bicame Musume artwork (a selectable art in ポイントカード設定), not the author's real card face.
+- The **card number / balance / barcode** (`0314 159 265 35`, `0 pt`, expiry `2038-01-19`) are dummy values injected by the `DEBUG`-only screenshot mode — the real API response is intercepted and rewritten before the app ever sees it.
 
 Full 3D flip animation:
 
