@@ -1,4 +1,4 @@
-// BicSkin — ポイントカード画像をダブルタップで default / 元画像 に切り替える
+// BicSkin — ポイントカード画像をダブルタップで Bicame Musume / 元画像 に切り替える
 // logos の %hook を使わず objc runtime API で method swizzle。これで
 // Sideload IPA (Dobby 静的) では CydiaSubstrate 依存が入らない。
 
@@ -6,8 +6,17 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-// default 画像を表示中かどうか
-static BOOL g_show_default_image = NO;
+// Bicame Musume (ビッカメ娘) カード絵柄。本来この絵柄はそのカードを所有する
+// アカウントにしか表示されないが、BicCamera の CDN 上に公開されているので
+// URL を直接叩いて取得できる。imageNamed:@"pointcard_default" 経由でアプリ
+// バンドルの asset を引く方法もあるが、BicCamera 側で名前が変わると壊れる
+// ので URL を hardcode してこちらから prefetch する。
+static NSString *const kBicSkinSwapImageURL =
+    @"https://d1v4cay8lxkuwy.cloudfront.net/?storagekey=/images/pointCard/bicamemusume.png";
+static UIImage *g_swap_image = nil;
+
+// swap 状態 (YES = swap image を表示中)
+static BOOL g_show_swap_image = NO;
 
 // ---------------------------------------------------------------------------
 // ファイルログ (Documents/bicskin.log)
@@ -135,13 +144,18 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
 
 - (void)bicSkin_doubleTap:(UITapGestureRecognizer *)gr {
     (void)gr;
-    g_show_default_image = !g_show_default_image;
-    UIImage *next = g_show_default_image
-        ? [UIImage imageNamed:@"pointcard_default"]
+    UIImage *swap = g_swap_image;
+    if (!g_show_swap_image && !swap) {
+        bic_log(@"DOUBLE-TAP ignored (swap image not yet loaded)");
+        return;
+    }
+    g_show_swap_image = !g_show_swap_image;
+    UIImage *next = g_show_swap_image
+        ? swap
         : (UIImage *)objc_getAssociatedObject(self,
               @selector(bicSkinOriginalImage));
-    bic_log(@"DOUBLE-TAP toggle -> showDefault=%d img=%@",
-            g_show_default_image, next);
+    bic_log(@"DOUBLE-TAP toggle -> showSwap=%d img=%@",
+            g_show_swap_image, next);
 
     UIImageView *iv = self;
 
@@ -163,7 +177,7 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
     // 手書き Y 軸 flip。UIViewAnimationOptionTransitionFlip* は snapshot 経由で
     // rounded mask が剥がれる問題があるので、実 layer を直接回して mask を維持。
     //   default 表示側: 右回転 (FromRight)、元画像側: 左回転 (FromLeft)
-    CGFloat dir = g_show_default_image ? -1.0 : 1.0;
+    CGFloat dir = g_show_swap_image ? -1.0 : 1.0;
     CATransform3D perspective = CATransform3DIdentity;
     perspective.m34 = -1.0 / 500.0;
     CATransform3D edgeOn1 = CATransform3DRotate(perspective, dir * M_PI_2, 0, 1, 0);
@@ -239,6 +253,24 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
 #endif
 
 // ---------------------------------------------------------------------------
+// Swap image prefetch — CDN からバックグラウンドで一度だけ取得してメモリに載せる。
+// 失敗しても致命ではない (double-tap 側で nil-check して no-op になる)。
+// ---------------------------------------------------------------------------
+static void bic_prefetch_swap_image(void) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSURL *url = [NSURL URLWithString:kBicSkinSwapImageURL];
+        NSData *data = [NSData dataWithContentsOfURL:url];
+        UIImage *img = data ? [UIImage imageWithData:data] : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            g_swap_image = img;
+            bic_log(@"swap image prefetch %@ (%lu bytes)",
+                    img ? @"OK" : @"FAILED",
+                    (unsigned long)data.length);
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Swizzler setup + ctor
 // ---------------------------------------------------------------------------
 static void bic_swizzle_instance(Class cls, SEL orig, SEL swiz) {
@@ -278,6 +310,7 @@ static void bic_init(void) {
     bic_swizzle_instance([UIImageView class],
                          @selector(setImage:),
                          @selector(bicSkin_setImage:));
+    bic_prefetch_swap_image();
 #ifdef DEBUG
     bic_swizzle_class([NSJSONSerialization class],
                       @selector(JSONObjectWithData:options:error:),
