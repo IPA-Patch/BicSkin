@@ -1,0 +1,24 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ../:/home/vscode/app:cached
+      - venv:/home/vscode/app/.venv
+      - uv-cache:/home/vscode/.cache/uv
+      - bun-cache:/home/vscode/.bun/install/cache
+      - npm-cache:/home/vscode/.npm
+      - pip-cache:/home/vscode/.cache/pip
+    # host networking helps talking to physical devices via libimobiledevice
+    # / iproxy over USB, and simplifies port relays to jailbroken hosts.
+    network_mode: host
+    tty: true
+    stdin_open: true
+
+volumes:
+  venv:
+  uv-cache:
+  bun-cache:
+  npm-cache:
+  pip-cache:
