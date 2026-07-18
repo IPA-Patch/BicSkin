@@ -21,10 +21,29 @@ static UIImage *g_bicame_image = nil;
 // asset `pointcard_default` から imageNamed で引く。lazy 読み込み。
 static UIImage *g_default_image = nil;
 
-// トグル状態 (NO = default 表示、YES = Bicame Musume 表示)。
-// UserDefaults に永続化して、次回起動時にも同じ側を初期表示する。
-static NSString *const kBicSkinShowBicameKey = @"__BicSkin_showBicame__";
-static BOOL g_show_bicame = NO;
+// トグルインデックス。追加パターン (別 collaboration カード等) を増やしても
+// 破壊的にならないよう、BOOL ではなく NSInteger でカードの pool を index で
+// 参照する形にしている。UserDefaults に永続化し次回起動時にも同じ位置を復元。
+static NSString *const kBicSkinCardIndexKey = @"__BicSkin_cardIndex__";
+static NSInteger g_card_index = 0;
+
+// カードフェイスの pool。順序は index 意味論なので後方互換のため末尾追加のみ。
+// 手元の image が nil (fetch/lookup 失敗) の場合はそのまま抜けて残りだけ返す。
+static NSArray<UIImage *> *bic_card_faces(void) {
+    NSMutableArray *a = [NSMutableArray array];
+    if (g_default_image) [a addObject:g_default_image];  // 0: default watermark
+    if (g_bicame_image)  [a addObject:g_bicame_image];   // 1: Bicame Musume
+    // 追加パターンはここに append (index は破壊的に変えない)
+    return a;
+}
+
+static UIImage *bic_current_face(void) {
+    NSArray *faces = bic_card_faces();
+    if (faces.count == 0) return nil;
+    NSInteger i = g_card_index % (NSInteger)faces.count;
+    if (i < 0) i += faces.count;
+    return faces[i];
+}
 
 // ---------------------------------------------------------------------------
 // ファイルログ (Documents/bicskin.log)
@@ -128,13 +147,20 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
 
 // 自分自身の呼び出しは swizzle 後に元の setImage: の実装に飛ぶ (%orig と同等)。
 // PointCard 判定できる時のみ image を UserDefaults 由来の側 (default / Bicame
-// Musume) に差し替えて呼び直す。判定に失敗するタイミング (setImage が view
-// hierarchy 挿入前に呼ばれるケース等) では原本のまま通す。
+// Musume) に差し替えて呼び直す。バーコード画像も同じ PointCard セル配下に居るので、
+// aspect ratio でカード絵柄かどうかを二段目のフィルタで判別する
+// (カード ≈ 2.26、バーコードは横長 5+)。
 - (void)bicSkin_setImage:(UIImage *)image {
     UIImage *toSet = image;
-    if (image && image.CGImage && bic_is_point_card_view(self) &&
-        g_default_image && g_bicame_image) {
-        toSet = g_show_bicame ? g_bicame_image : g_default_image;
+    UIImage *current = bic_current_face();
+    if (image && image.CGImage && current && bic_is_point_card_view(self) &&
+        g_default_image) {
+        CGFloat imgAspect  = image.size.width / MAX(image.size.height, 1);
+        CGFloat cardAspect = g_default_image.size.width /
+                             MAX(g_default_image.size.height, 1);
+        if (fabs(imgAspect - cardAspect) < 0.5) {
+            toSet = current;
+        }
     }
     [self bicSkin_setImage:toSet];
 
@@ -170,17 +196,18 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
 
 - (void)bicSkin_doubleTap:(UITapGestureRecognizer *)gr {
     (void)gr;
-    if (!g_default_image || !g_bicame_image) {
-        bic_log(@"DOUBLE-TAP ignored (default=%d bicame=%d not ready)",
-                g_default_image != nil, g_bicame_image != nil);
+    NSArray *faces = bic_card_faces();
+    if (faces.count < 2) {
+        bic_log(@"DOUBLE-TAP ignored (only %lu face(s) loaded)",
+                (unsigned long)faces.count);
         return;
     }
-    g_show_bicame = !g_show_bicame;
-    [[NSUserDefaults standardUserDefaults] setBool:g_show_bicame
-                                            forKey:kBicSkinShowBicameKey];
-    UIImage *next = g_show_bicame ? g_bicame_image : g_default_image;
-    bic_log(@"DOUBLE-TAP toggle -> showBicame=%d img=%@ (persisted)",
-            g_show_bicame, next);
+    g_card_index = (g_card_index + 1) % (NSInteger)faces.count;
+    [[NSUserDefaults standardUserDefaults] setInteger:g_card_index
+                                               forKey:kBicSkinCardIndexKey];
+    UIImage *next = faces[g_card_index];
+    bic_log(@"DOUBLE-TAP toggle -> cardIndex=%ld/%lu img=%@ (persisted)",
+            (long)g_card_index, (unsigned long)faces.count, next);
 
     UIImageView *iv = self;
 
@@ -201,8 +228,8 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
 
     // 手書き Y 軸 flip。UIViewAnimationOptionTransitionFlip* は snapshot 経由で
     // rounded mask が剥がれる問題があるので、実 layer を直接回して mask を維持。
-    //   default 表示側: 右回転 (FromRight)、元画像側: 左回転 (FromLeft)
-    CGFloat dir = g_show_bicame ? -1.0 : 1.0;
+    // 回転方向は cardIndex の偶奇で交互に振って、往復に見えるようにする。
+    CGFloat dir = (g_card_index % 2 == 0) ? 1.0 : -1.0;
     CATransform3D perspective = CATransform3DIdentity;
     perspective.m34 = -1.0 / 500.0;
     CATransform3D edgeOn1 = CATransform3DRotate(perspective, dir * M_PI_2, 0, 1, 0);
@@ -332,8 +359,8 @@ static void bic_init(void) {
     bic_prefetch_bicame_image();
 
     // 前回セッションで最後にトグルした側を復元
-    g_show_bicame = [[NSUserDefaults standardUserDefaults]
-                        boolForKey:kBicSkinShowBicameKey];
+    g_card_index = [[NSUserDefaults standardUserDefaults]
+                        integerForKey:kBicSkinCardIndexKey];
 
 #ifdef DEBUG
     bic_swizzle_class([NSJSONSerialization class],
@@ -342,10 +369,10 @@ static void bic_init(void) {
     bic_swizzle_class([NSJSONSerialization class],
                       @selector(JSONObjectWithStream:options:error:),
                       @selector(bicSkin_JSONObjectWithStream:options:error:));
-    bic_log(@"===== BicSkin loaded @ pid=%d (DEBUG: dummy tampering ON) showBicame=%d =====",
-            getpid(), g_show_bicame);
+    bic_log(@"===== BicSkin loaded @ pid=%d (DEBUG: dummy tampering ON) cardIndex=%ld =====",
+            getpid(), (long)g_card_index);
 #else
-    bic_log(@"===== BicSkin loaded @ pid=%d (RELEASE) showBicame=%d =====",
-            getpid(), g_show_bicame);
+    bic_log(@"===== BicSkin loaded @ pid=%d (RELEASE) cardIndex=%ld =====",
+            getpid(), (long)g_card_index);
 #endif
 }
