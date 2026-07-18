@@ -1,19 +1,45 @@
-# BicSkin
+<h1 align="center">BicSkin</h1>
 
-An iOS tweak for **BicCamera** (`com.biccamera.ios.mobile.BicCamera`) that lets you flip the point card on screen with a double-tap — swap between your real card and a bundled placeholder so you can share screenshots of the app without leaking your card number or barcode.
+<p align="center">
+  <em>Screenshot-friendly BicCamera point card.<br/>
+  Double-tap to flip to a bundled placeholder, DEBUG mode fakes the card number too — all client-side, zero server impact.</em>
+</p>
+
+<p align="center">
+  <img alt="version" src="https://img.shields.io/badge/version-v0.1.0-2f80ed?style=flat-square" />
+  <img alt="targets BicCamera" src="https://img.shields.io/badge/targets-BicCamera%205.4.3-ff66a3?style=flat-square" />
+  <img alt="platform" src="https://img.shields.io/badge/platform-iOS%2014.0%2B-blue?style=flat-square" />
+  <img alt="arch" src="https://img.shields.io/badge/arch-arm64%20rootless-555?style=flat-square" />
+  <img alt="runs" src="https://img.shields.io/badge/runs-client--side%20only-1f9d55?style=flat-square" />
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-1f9d55?style=flat-square" />
+</p>
+
+---
+
+**ビックカメラ (BicCamera)** is Bic Camera Inc.'s official iOS shopping app,
+available on the [App Store](https://apps.apple.com/jp/app/id518593576).
+
+BicSkin is a local screenshot-hygiene tweak for **BicCamera** that lets you
+share the point-card screen without leaking your card number or barcode.
+Double-tap the card image to flip between the real card art and a bundled
+placeholder, and — in debug builds — the profile-fetch API response is
+rewritten in place so the visible number, balance, and barcode are all
+dummy values. Every change runs on-device and never touches the server or
+the app's real account state.
+
+<p align="center">
+  <img src="docs/pointcard-bicame-musume.png" alt="Bicame Musume card art" width="240" />
+  <img src="docs/pointcard-default.png" alt="Placeholder card" width="240" />
+</p>
+
+Both captures above are safe demo screens — the left card art is
+BicCamera's own selectable *Bicame Musume* (ビッカメ娘) design, the right
+is the bundled `pointcard_default` placeholder, and the barcode /
+`0314 159 265 35` / `0 pt` / `2038-01-19` fields are all dummy values
+injected by the DEBUG-only screenshot mode. Nothing here belongs to a
+real account.
 
 ## Demo
-
-Double-tap the card to flip between the card image the app is showing and the bundled placeholder:
-
-| Bicame Musume (ビッカメ娘) | Placeholder (`pointcard_default`) |
-|:---:|:---:|
-| <img src="docs/pointcard-bicame-musume.png" width="280"> | <img src="docs/pointcard-default.png" width="280"> |
-
-Nothing here is a real account:
-
-- The **card design** on the left is BicCamera's own Bicame Musume artwork (a selectable art in ポイントカード設定), not the author's real card face.
-- The **card number / balance / barcode** (`0314 159 265 35`, `0 pt`, expiry `2038-01-19`) are dummy values injected by the `DEBUG`-only screenshot mode — the real API response is intercepted and rewritten before the app ever sees it.
 
 Full 3D flip animation:
 
@@ -21,58 +47,110 @@ Full 3D flip animation:
   <video src="docs/demo.mov" controls muted playsinline width="320"></video>
 </div>
 
-If the inline player doesn't render for you, download [docs/demo.mov](docs/demo.mov) and open it locally.
+If the inline player doesn't render for you, download
+[docs/demo.mov](docs/demo.mov) and open it locally.
 
 ## Features
 
-- **Double-tap card flip.** Toggle between the real point card image and a bundled placeholder with a smooth 3D flip. Implemented via manual `CATransform3D` rotation so the card's rounded corners are preserved throughout the animation — unlike `UIViewAnimationOptionTransitionFlip*`, which snapshots the layer and drops the mask mid-flip.
-- **Card + barcode only.** The flip is scoped to the card image and its barcode strip — the point balance row below stays readable during the animation.
-- **Cross-injection safe.** Works whether the dylib is injected via MobileSubstrate (`.deb` on a jailbroken device) or embedded into the app bundle via a jailed IPA (Sideloadly / TrollStore). A process-wide install marker prevents both paths from cancelling each other out when they end up loaded together (`method_exchangeImplementations` is self-inverse).
-- **Screenshot-friendly DEBUG mode.** Debug builds swizzle `NSJSONSerialization` to inject a dummy card number, balance, barcode, and point history — handy for capturing feature screenshots without a real account. Fully stripped by `FINALPACKAGE=1`.
+| Toggle | What it does |
+|---|---|
+| **Card Flip** | Double-tap the point-card image to flip between the real card and the bundled `pointcard_default` placeholder. Uses a manual `CATransform3D` Y-axis rotation so the card's rounded corners are preserved throughout the animation — `UIViewAnimationOptionTransitionFlip*` snapshots the layer and drops the mask mid-flip, so we walk the view hierarchy to find the rounded container and animate it directly instead. Scoped to the card + barcode block; the point-balance row below stays static. |
+| **Dummy Data Injection** *(DEBUG only)* | Swizzles `NSJSONSerialization.JSONObjectWithData:` / `JSONObjectWithStream:` to rewrite the point-card record (`pointCardNumber`, `barcodeNumber`, `points`, `pointCardStatus`, expiry, promotions) with fixed dummy values before the app parses the response. Enabled in `DEBUG` builds, compiled out entirely by `FINALPACKAGE=1`. |
 
-## Install
+## Card Flip
 
-### Jailbroken (Dopamine / palera1n / …)
+The card image is a `UIImageView` nested inside a `PointCardViewCell`. The
+first `setImage:` per instance (skipping views under 100k px so app icons
+and thumbnails are ignored) attaches a double-tap `UITapGestureRecognizer`
+and stashes the original image via associated objects. Each tap toggles a
+process-global flag and re-invokes `setImage:` with either the stashed
+original or the bundled `pointcard_default` asset.
 
-Grab the latest `.deb` from the Releases page and install it via Sileo or Zebra, or push it to the device manually:
+The animation is intentionally *not* the built-in flip transition. UIKit's
+`UIViewAnimationOptionTransitionFlipFromLeft/Right` takes a rectangular
+snapshot of the layer and animates that — the layer's `cornerRadius +
+masksToBounds` mask is dropped for the duration of the flip, so the
+rectangular snapshot corners briefly show through around the rounded
+card. BicSkin walks the superview chain from the image, picks the deepest
+`cornerRadius > 0` ancestor that still contains the image, and runs a
+two-stage `CATransform3D` Y-axis rotation on **its** layer directly. The
+mask stays applied, and the halves are stitched by an `edgeOn` swap at
+π/2 inside a `CATransaction { setDisableActions: YES }` so the implicit
+`contents` fade doesn't leak.
 
+## Dummy Data Injection *(DEBUG only)*
+
+Debug builds swizzle `NSJSONSerialization`'s two class-method entry points
+(`JSONObjectWithData:` and `JSONObjectWithStream:`). Any parsed dict is
+inspected for point-card shape (presence of `pointCardNumber` /
+`barcodeNumber`), and if matched, the entire user-card record is replaced
+with a fixed dummy: card number `31415926535` (the first ten digits of
+π), zero balance, no active promotions, expiry `2038-01-19`.
+
+Card art (the image bytes) is **not** touched — the *Bicame Musume*
+design in the screenshots above is BicCamera's own selectable point-card
+artwork (choosable in ポイントカード設定), not something BicSkin injects.
+
+In `FINALPACKAGE=1` builds the whole `#ifdef DEBUG` block is compiled out
+— there is no runtime toggle and no code path that can fire it.
+
+## Compatibility
+
+BicCamera is an online shopping app — its point-card API schema is
+unlikely to churn, but there is no guarantee. The recommended target is
+always the **latest supported version**.
+
+### Platform
+
+| | |
+|---|---|
+| **Latest supported BicCamera** | `5.4.3` |
+| **BicSkin minimum iOS** | 14.0 |
+| **Tested on** | iOS 15.0 – 17, arm64 |
+| **Distribution** | Jailbroken `.deb`, TrollStore jailed `.dylib`, Patched IPA (Sideloadly / AltStore) |
+
+## Build
+
+### Jailbroken device (rootless)
+
+`make package install` transfers and installs the `.deb` over SSH.
+Requires OpenSSH on both sides — `openssh-server` on the device (install
+via Sileo / Zebra) and `ssh` on the host.
+
+```sh
+make package
+make package install THEOS_DEVICE_IP=<device-ip>
 ```
-scp com.tkgstrator.bicskin_*.deb mobile@<device>:/tmp/
-ssh mobile@<device> sudo dpkg -i /tmp/com.tkgstrator.bicskin_*.deb
+
+### Jailed dylib (TrollStore)
+
+TrollStore is only supported on specific iOS versions. Check the
+[supported versions table](https://ios.cfw.guide/installing-trollstore/)
+before proceeding.
+
+```sh
+make jailed
+# -> packages/jailed/BicSkin.dylib
 ```
 
-### Sideloadly / TrollStore
+Stage inside the decrypted BicCamera `.app/Frameworks/`, add an
+`LC_LOAD_DYLIB` entry pointing at it, then install via TrollStore.
 
-Grab the pre-patched IPA from the Releases page and install it with TrollStore or Sideloadly. No jailbreak required.
+### Patched IPA (Sideload)
 
-## Build from source
+For devices where TrollStore is unavailable. Install the patched IPA with
+[Sideloadly](https://sideloadly.io/) or [AltStore](https://altstore.io/).
 
-Requires [Theos](https://theos.dev/) and the vendored deps under `vendor/` (`fishhook` for all builds, `Dobby` for jailed builds). A Devcontainer with the full toolchain is included — open the repo in VS Code and it will provision everything.
+Requires a **decrypted** BicCamera IPA (e.g. obtained via
+[palera1n](https://palera.in/) + Filza, or
+[TrollDecrypt](https://github.com/donato-fiore/TrollDecrypt)). The App
+Store download is FairPlay-encrypted and cannot be patched directly.
 
-```
-# Jailbroken rootless .deb, installed to $THEOS_DEVICE_IP
-make package install
-
-# Jailed IPA (drop a decrypted BicCamera IPA under assets/ first)
+```sh
+mkdir -p assets
+cp ~/Downloads/BicCamera-5.4.3.ipa assets/
 make deploy
 ```
-
-The full target list is documented at the top of the [Makefile](Makefile).
-
-## Layout
-
-| Path | What |
-|---|---|
-| `Sources/BicSkin/Tweak.m` | The tweak — plain Objective-C, no `.x` / logos. |
-| `Makefile` | Project-agnostic Theos template driven off `control` + `Tweak.plist`. |
-| `vendor/` | Pinned copies of `fishhook` and `Dobby`. |
-| `frida/` | TypeScript Frida agent used during reverse engineering. |
-| `assets/` | Drop your decrypted BicCamera IPA here (gitignored). |
-| `docs/` | Demo assets shown in this README. |
-
-## Notes
-
-BicSkin is a personal project and isn't affiliated with BicCamera / Bic Camera Inc. Use at your own risk.
 
 ## License
 
