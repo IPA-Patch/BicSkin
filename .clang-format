@@ -1,0 +1,15 @@
+---
+# clang-format config for the Objective-C / C / Objective-C++ tweak sources.
+# Applied by `make format` (see Makefile).
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+PointerAlignment: Right
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: None
+AlignAfterOpenBracket: Align
+ObjCBlockIndentWidth: 4
+ObjCSpaceAfterProperty: true
+ObjCSpaceBeforeProtocolList: true
