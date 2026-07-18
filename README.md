@@ -70,3 +70,7 @@ The full target list is documented at the top of the [Makefile](Makefile).
 ## Notes
 
 BicSkin is a personal project and isn't affiliated with BicCamera / Bic Camera Inc. Use at your own risk.
+
+## License
+
+[MIT](LICENSE) © tkgstrator
