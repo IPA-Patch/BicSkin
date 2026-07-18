@@ -1,6 +1,10 @@
-// BicSkin — ポイントカード画像をダブルタップで Bicame Musume / 元画像 に切り替える
+// BicSkin — ポイントカード画像をダブルタップで default / Bicame Musume に切り替える
 // logos の %hook を使わず objc runtime API で method swizzle。これで
 // Sideload IPA (Dobby 静的) では CydiaSubstrate 依存が入らない。
+//
+// 切り替えは常に「BicCamera bundled default (pointcard_default) ↔ Bicame Musume」
+// の 2 択固定。account が既に Bicame Musume を所有していても toggle が意味を持つ
+// ように、原本画像には依存しない。
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -8,15 +12,17 @@
 
 // Bicame Musume (ビッカメ娘) カード絵柄。本来この絵柄はそのカードを所有する
 // アカウントにしか表示されないが、BicCamera の CDN 上に公開されているので
-// URL を直接叩いて取得できる。imageNamed:@"pointcard_default" 経由でアプリ
-// バンドルの asset を引く方法もあるが、BicCamera 側で名前が変わると壊れる
-// ので URL を hardcode してこちらから prefetch する。
-static NSString *const kBicSkinSwapImageURL =
+// URL を直接叩いて取得できる。
+static NSString *const kBicSkinBicameMusumeURL =
     @"https://d1v4cay8lxkuwy.cloudfront.net/?storagekey=/images/pointCard/bicamemusume.png";
-static UIImage *g_swap_image = nil;
+static UIImage *g_bicame_image = nil;
 
-// swap 状態 (YES = swap image を表示中)
-static BOOL g_show_swap_image = NO;
+// default (plain "BicCamera POINT CARD" watermark) は BicCamera の app bundle 内
+// asset `pointcard_default` から imageNamed で引く。lazy 読み込み。
+static UIImage *g_default_image = nil;
+
+// トグル状態 (NO = default 表示、YES = Bicame Musume 表示)
+static BOOL g_show_bicame = NO;
 
 // ---------------------------------------------------------------------------
 // ファイルログ (Documents/bicskin.log)
@@ -52,15 +58,19 @@ static void bic_log(NSString *fmt, ...) {
 }
 
 // ---------------------------------------------------------------------------
-// DEBUG ビルド専用: ポイントカードレスポンスをダミー値に差し替え
-//   (機能説明スクショ用。pointCardImage は setImage 経路で切り替えるため触らない)
-//   FINALPACKAGE=1 でビルドすると DEBUG マクロが外れて全部消える。
+// JSON hook: ポイントカードレスポンスを 2 方向で処理する。
+//   1) inspect (常時): pointCardImage の URL を見て初期表示側を決める。
+//      アカウントが既に Bicame Musume 所有なら g_show_bicame = YES にしておくと、
+//      初回タップで自然と default 側へ flip する挙動になる。
+//   2) tamper (DEBUG 専用): ダミー値で番号・バーコード・残高等を上書き。
+//      機能説明スクショで実値を晒さないためのもの。FINALPACKAGE=1 で消える。
 // ---------------------------------------------------------------------------
 #ifdef DEBUG
 static NSString * const kDummyBarcode          = @"3141592653589";
 static const long long kDummyCardNumber        = 31415926535LL;
 static NSString * const kDummyPointExpiration  = @"2038-01-19";  // Y2K38
 static NSString * const kDummyBicpayExpiration = @"2077-01-01";  // 目印用
+#endif
 
 static id bic_skin_apply(id obj) {
     if (![obj isKindOfClass:[NSDictionary class]]) return obj;
@@ -68,6 +78,23 @@ static id bic_skin_apply(id obj) {
     if (dict[@"pointCardNumber"] == nil && dict[@"barcodeNumber"] == nil) {
         return obj;
     }
+
+    // 1) 初期表示側の決定 (1 回だけ)。pointCardImage を含む本物の profile
+    //    response でのみ発火するようにガードする (pointCardNumber は他の
+    //    エンドポイントの keys にも入ってるので条件に使えない)。
+    id img = dict[@"pointCardImage"];
+    if ([img isKindOfClass:[NSString class]]) {
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            BOOL isBicame = [(NSString *)img containsString:@"bicamemusume"];
+            g_show_bicame = isBicame;
+            bic_log(@"initial state: %s (pointCardImage=%@)",
+                    isBicame ? "bicame" : "default", img);
+        });
+    }
+
+#ifdef DEBUG
+    // 2) ダミー値上書き
     NSMutableDictionary *m =
         [dict isKindOfClass:[NSMutableDictionary class]]
             ? (NSMutableDictionary *)dict
@@ -83,8 +110,10 @@ static id bic_skin_apply(id obj) {
     bic_log(@"[DEBUG] tampering applied to keys=%@",
             [dict.allKeys componentsJoinedByString:@","]);
     return m;
-}
+#else
+    return obj;
 #endif
+}
 
 // iv を含む枝を深さ優先で辿り、最深の cornerRadius > 0 の view を返す。
 static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
@@ -119,12 +148,13 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
     size_t h = CGImageGetHeight(cg);
     if (w * h < 100000) return;
 
-    // BicSkin 経由の setImage 中は「元画像」の associated object を触らない
-    NSNumber *inProg = objc_getAssociatedObject(self,
-        @selector(bicSkinInProgrammaticSet));
-    if (![inProg boolValue]) {
-        objc_setAssociatedObject(self, @selector(bicSkinOriginalImage),
-                                 image, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // default 画像を lazy load。app bundle 内 asset `pointcard_default` を引く。
+    // ctor 時に呼ぶと asset catalog がまだ ready じゃないケースがあるので、
+    // 最初の大きな setImage: の主 thread callback 経路でロードする。
+    if (!g_default_image) {
+        g_default_image = [UIImage imageNamed:@"pointcard_default"];
+        bic_log(@"default image %@ (imageNamed:pointcard_default)",
+                g_default_image ? @"loaded" : @"MISSING");
     }
 
     // ダブルタップ gesture を 1 回だけ install
@@ -144,18 +174,15 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
 
 - (void)bicSkin_doubleTap:(UITapGestureRecognizer *)gr {
     (void)gr;
-    UIImage *swap = g_swap_image;
-    if (!g_show_swap_image && !swap) {
-        bic_log(@"DOUBLE-TAP ignored (swap image not yet loaded)");
+    if (!g_default_image || !g_bicame_image) {
+        bic_log(@"DOUBLE-TAP ignored (default=%d bicame=%d not ready)",
+                g_default_image != nil, g_bicame_image != nil);
         return;
     }
-    g_show_swap_image = !g_show_swap_image;
-    UIImage *next = g_show_swap_image
-        ? swap
-        : (UIImage *)objc_getAssociatedObject(self,
-              @selector(bicSkinOriginalImage));
-    bic_log(@"DOUBLE-TAP toggle -> showSwap=%d img=%@",
-            g_show_swap_image, next);
+    g_show_bicame = !g_show_bicame;
+    UIImage *next = g_show_bicame ? g_bicame_image : g_default_image;
+    bic_log(@"DOUBLE-TAP toggle -> showBicame=%d img=%@",
+            g_show_bicame, next);
 
     UIImageView *iv = self;
 
@@ -177,7 +204,7 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
     // 手書き Y 軸 flip。UIViewAnimationOptionTransitionFlip* は snapshot 経由で
     // rounded mask が剥がれる問題があるので、実 layer を直接回して mask を維持。
     //   default 表示側: 右回転 (FromRight)、元画像側: 左回転 (FromLeft)
-    CGFloat dir = g_show_swap_image ? -1.0 : 1.0;
+    CGFloat dir = g_show_bicame ? -1.0 : 1.0;
     CATransform3D perspective = CATransform3DIdentity;
     perspective.m34 = -1.0 / 500.0;
     CATransform3D edgeOn1 = CATransform3DRotate(perspective, dir * M_PI_2, 0, 1, 0);
@@ -199,11 +226,7 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
 
-        objc_setAssociatedObject(iv, @selector(bicSkinInProgrammaticSet),
-                                 @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [iv setImage:next];
-        objc_setAssociatedObject(iv, @selector(bicSkinInProgrammaticSet),
-                                 @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
         [flipTarget.layer removeAnimationForKey:@"bicSkinFlip1"];
 
@@ -224,9 +247,8 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
 @end
 
 // ---------------------------------------------------------------------------
-// DEBUG: NSJSONSerialization JSONObjectWithData: を swizzle して dummy 注入
+// NSJSONSerialization swizzle。inspect は常時、tamper は DEBUG のみ。
 // ---------------------------------------------------------------------------
-#ifdef DEBUG
 @interface NSJSONSerialization (BicSkin)
 + (id)bicSkin_JSONObjectWithData:(NSData *)data
                          options:(NSJSONReadingOptions)opt
@@ -250,20 +272,19 @@ static UIView *bic_deepest_rounded_containing(UIView *root, UIView *iv) {
     return bic_skin_apply(obj);
 }
 @end
-#endif
 
 // ---------------------------------------------------------------------------
-// Swap image prefetch — CDN からバックグラウンドで一度だけ取得してメモリに載せる。
-// 失敗しても致命ではない (double-tap 側で nil-check して no-op になる)。
+// Bicame Musume 画像 prefetch — CDN からバックグラウンドで一度だけ取得してメモリに
+// 載せる。失敗しても致命ではない (double-tap 側で nil-check して no-op になる)。
 // ---------------------------------------------------------------------------
-static void bic_prefetch_swap_image(void) {
+static void bic_prefetch_bicame_image(void) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        NSURL *url = [NSURL URLWithString:kBicSkinSwapImageURL];
+        NSURL *url = [NSURL URLWithString:kBicSkinBicameMusumeURL];
         NSData *data = [NSData dataWithContentsOfURL:url];
         UIImage *img = data ? [UIImage imageWithData:data] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
-            g_swap_image = img;
-            bic_log(@"swap image prefetch %@ (%lu bytes)",
+            g_bicame_image = img;
+            bic_log(@"bicame image prefetch %@ (%lu bytes)",
                     img ? @"OK" : @"FAILED",
                     (unsigned long)data.length);
         });
@@ -280,14 +301,12 @@ static void bic_swizzle_instance(Class cls, SEL orig, SEL swiz) {
     method_exchangeImplementations(mOrig, mSwiz);
 }
 
-#ifdef DEBUG
 static void bic_swizzle_class(Class cls, SEL orig, SEL swiz) {
     Method mOrig = class_getClassMethod(cls, orig);
     Method mSwiz = class_getClassMethod(cls, swiz);
     if (!mOrig || !mSwiz) return;
     method_exchangeImplementations(mOrig, mSwiz);
 }
-#endif
 
 __attribute__((constructor))
 static void bic_init(void) {
@@ -310,14 +329,16 @@ static void bic_init(void) {
     bic_swizzle_instance([UIImageView class],
                          @selector(setImage:),
                          @selector(bicSkin_setImage:));
-    bic_prefetch_swap_image();
-#ifdef DEBUG
+    bic_prefetch_bicame_image();
+    // NSJSONSerialization swizzle は inspect (初期表示側決定) のため常時 install。
+    // DEBUG ビルドでは加えて dummy 値上書きも走る。
     bic_swizzle_class([NSJSONSerialization class],
                       @selector(JSONObjectWithData:options:error:),
                       @selector(bicSkin_JSONObjectWithData:options:error:));
     bic_swizzle_class([NSJSONSerialization class],
                       @selector(JSONObjectWithStream:options:error:),
                       @selector(bicSkin_JSONObjectWithStream:options:error:));
+#ifdef DEBUG
     bic_log(@"===== BicSkin loaded @ pid=%d (DEBUG: dummy tampering ON) =====",
             getpid());
 #else
