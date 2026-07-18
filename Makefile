@@ -44,11 +44,11 @@ TWEAK_SOURCES_DIR        := Sources/$(TWEAK_NAME)
 _PLIST_SYMLINK           := $(shell [ -f Tweak.plist ] && [ "$(TWEAK_NAME)" != "Tweak" ] \
                                     && ln -sfn Tweak.plist $(TWEAK_NAME).plist)
 
-# TARGET_BUNDLE_ID: Tweak.plist の Filter > Bundles の最初の <string> を採用。
-# 複数バンドルを対象にする場合は .env or CLI で override してね。
+# TARGET_BUNDLE_ID: first <string> under Filter > Bundles in Tweak.plist.
+# Override in .env or on the CLI when targeting multiple bundles.
 TARGET_BUNDLE_ID         ?= $(shell sed -n 's:.*<string>\([^<]*\)</string>.*:\1:p' Tweak.plist 2>/dev/null | head -1)
-# TARGET_PROCESS: bundle id の末尾 component を採用 (多くの iOS App では
-# CFBundleExecutable と一致する)。ずれる場合は .env or CLI で override。
+# TARGET_PROCESS: last dot-component of the bundle id (matches
+# CFBundleExecutable for most iOS apps). Override in .env or on the CLI when they diverge.
 TARGET_PROCESS           ?= $(notdir $(subst .,/,$(TARGET_BUNDLE_ID)))
 
 # Decrypted IPA the ipa/deploy pipeline consumes. App Store IPAs ship
@@ -124,7 +124,7 @@ include $(THEOS_MAKE_PATH)/tweak.mk
 
 after-install::
 	install.exec "chmod 755 /var/jb/Library/MobileSubstrate/DynamicLibraries/$(TWEAK_NAME).dylib"
-	# INSTALL_TARGET_PROCESSES で kill 済み。フレッシュな tweak を反映するため relaunch。
+	# INSTALL_TARGET_PROCESSES already killed the app; relaunch here so the fresh tweak takes effect.
 	install.exec "sleep 1; (open $(TARGET_BUNDLE_ID) 2>/dev/null || uiopen $(TARGET_BUNDLE_ID):// 2>/dev/null || echo 'no launcher tool (uiopen/open); start $(TARGET_PROCESS) manually')"
 
 # ---------------------------------------------------------------------------
