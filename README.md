@@ -19,21 +19,26 @@
 **ビックカメラ (BicCamera)** is Bic Camera Inc.'s official iOS shopping app,
 available on the [App Store](https://apps.apple.com/jp/app/id518593576).
 
-BicSkin is a local tweak for **BicCamera** that flips the on-screen
-point-card face with a double-tap between two fixed images:
+BicSkin is a local tweak for **BicCamera** that cycles the on-screen
+point-card face with a double-tap. Two faces ship in v0.1.0 and the
+list is designed to grow — the toggle state is stored as an index into
+an ordered pool, not a boolean, so additional designs can be appended
+without breaking anyone's persisted preference.
 
-- the **plain default** — BicCamera's own bundled `pointcard_default`
-  watermark, the fallback face the app already carries for accounts
-  without a specific card art assigned;
-- the ***Bicame Musume*** (ビッカメ娘) **collaboration design** —
-  fetched once at launch from BicCamera's CDN and cached in memory.
+Current pool:
 
-The last side you flipped to is persisted to `NSUserDefaults`, so the
-next launch restores it as the starting face — the tweak intercepts the
-first `setImage:` on any view sitting inside a `PointCard`-named
-ancestor and swaps the app's fetched art for the persisted choice
-before it ever renders. Every change runs on-device and never touches
-the server or your account state.
+| Index | Face | Source |
+|---|---|---|
+| `0` | Plain default — BicCamera's `pointcard_default` watermark | app bundle via `imageNamed:` |
+| `1` | *Bicame Musume* (ビッカメ娘) collaboration design | CDN prefetch |
+
+The last index you flipped to is persisted to `NSUserDefaults`, so the
+next launch starts on the same face — the tweak intercepts the first
+`setImage:` on any view sitting inside a `PointCard`-named ancestor
+(with a card-shaped aspect ratio so the barcode strip alongside isn't
+swapped by accident) and substitutes the persisted choice before it
+ever renders. Every change runs on-device and never touches the server
+or your account state.
 
 <p align="center">
   <img src="docs/pointcard-original.png" alt="Point card as this account normally shows it" width="240" />
