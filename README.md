@@ -4,13 +4,13 @@ An iOS tweak for **BicCamera** (`com.biccamera.ios.mobile.BicCamera`) that lets 
 
 ## Demo
 
-Double-tap the card to flip between your real point card and the bundled placeholder:
+Double-tap the card to flip between the card image the app is showing and the bundled placeholder:
 
-| Real card | Placeholder (`pointcard_default`) |
+| Bikkame Musume (ビッカメ娘) | Placeholder (`pointcard_default`) |
 |:---:|:---:|
-| <img src="docs/pointcard-real.png" width="280"> | <img src="docs/pointcard-default.png" width="280"> |
+| <img src="docs/pointcard-bikkame-musume.png" width="280"> | <img src="docs/pointcard-default.png" width="280"> |
 
-The card number, balance, and barcode above are dummy values (`0314 159 265 35`) injected by the `DEBUG`-only screenshot mode — nothing real gets exposed in these captures.
+Both captures use dummy card number / balance / barcode (`0314 159 265 35`) injected by the `DEBUG`-only screenshot mode, so nothing real is exposed here either.
 
 Full 3D flip animation:
 
