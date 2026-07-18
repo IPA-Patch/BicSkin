@@ -1,0 +1,10 @@
+Package: com.tkgstrator.bicskin
+Name: BicSkin
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: BicCamera point card image / frame swap tweak.
+Depiction: https://example.com
+Maintainer: tkgstrator
+Author: tkgstrator
+Section: Tweaks
+Depends: mobilesubstrate
