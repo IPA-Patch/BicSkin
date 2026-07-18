@@ -47,7 +47,7 @@ _PLIST_SYMLINK           := $(shell [ -f Tweak.plist ] && [ "$(TWEAK_NAME)" != "
 # TARGET_BUNDLE_ID: Tweak.plist の Filter > Bundles の最初の <string> を採用。
 # 複数バンドルを対象にする場合は .env or CLI で override してね。
 TARGET_BUNDLE_ID         ?= $(shell sed -n 's:.*<string>\([^<]*\)</string>.*:\1:p' Tweak.plist 2>/dev/null | head -1)
-# TARGET_PROCESS: bundle id の末尾 component を採用 (BicCamera 系はこれで
+# TARGET_PROCESS: bundle id の末尾 component を採用 (多くの iOS App では
 # CFBundleExecutable と一致する)。ずれる場合は .env or CLI で override。
 TARGET_PROCESS           ?= $(notdir $(subst .,/,$(TARGET_BUNDLE_ID)))
 
