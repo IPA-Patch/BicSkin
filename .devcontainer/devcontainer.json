@@ -67,16 +67,17 @@
       "extensions": [
         "EditorConfig.EditorConfig",
         "PKief.material-icon-theme",
+        "WakaTime.vscode-wakatime",
         "antfu.file-nesting",
         "bierner.markdown-mermaid",
         "bierner.markdown-preview-github-styles",
         "charliermarsh.ruff",
         "ms-python.python",
         "ms-python.vscode-pylance",
+        "ms-vscode.cpptools",
         "redhat.vscode-yaml",
         "swiftlang.swift-vscode",
         "tamasfe.even-better-toml",
-        "ms-vscode.cpptools",
         "xaver.clang-format"
       ],
       "settings": {}
